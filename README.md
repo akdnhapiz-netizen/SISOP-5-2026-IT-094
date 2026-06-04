@@ -730,6 +730,9 @@ echo "==> single.gz selesai dibuat di osboot dengan aman!"
 <img width="555" height="111" alt="image" src="https://github.com/user-attachments/assets/b495e175-cf10-4969-97aa-20efcb4fe38e" />
 <img width="708" height="446" alt="image" src="https://github.com/user-attachments/assets/8daeb4b2-96d9-4b7f-95ef-0a78f0072a8a" />
 
+### Kendala yang Dihadapi
+Belum bisa menjalankan testcase `wget example.com`
+
 # Revisi Soal 2
 ### Solusi Script (`bochsrc.txt`) revisi bochsrc.txt
 ```txt
@@ -749,18 +752,23 @@ speaker: enabled=0, mode=none
 int cursor = 0;
 char color = 0x07;
 
-/* Prototipe fungsi assembly */
+/* * PINDAHKAN KE GLOBAL SCOPE 
+ * Agar dialokasikan di Data Segment (DS) untuk menghindari bug DS != SS pada bcc
+ */
+char cmd[64];
+char resBuf[32];
+int a, b, n, i, j, next;
+char *name;
+
 void putInMemory(int segment, int address, char character);
 int getChar();
 
-/* Fungsi output per karakter */
 void printChar(char character) {
     putInMemory(0xB800, cursor, character);
     putInMemory(0xB800, cursor + 1, color);
     cursor += 2;
 }
 
-/* Fungsi output string */
 void printString(char *string) {
     int i = 0;
     while (string[i] != '\0') {
@@ -769,7 +777,6 @@ void printString(char *string) {
     }
 }
 
-/* Fungsi baris baru (pengganti modulo %) */
 void newline() {
     int temp = cursor;
     while (temp >= 160) {
@@ -777,11 +784,10 @@ void newline() {
     }
     cursor = cursor - temp + 160;
     if (cursor >= 4000) {
-        cursor = 0; /* Reset jika layar penuh */
+        cursor = 0;
     }
 }
 
-/* Fungsi membersihkan layar */
 void clearScreen() {
     int i;
     for (i = 0; i < 80 * 25 * 2; i += 2) {
@@ -791,7 +797,6 @@ void clearScreen() {
     cursor = 0;
 }
 
-/* Fungsi membaca input keyboard */
 void readString(char *buf) {
     int i = 0;
     char c;
@@ -815,7 +820,6 @@ void readString(char *buf) {
     }
 }
 
-/* Fungsi komparasi string */
 int strcmp(char *s1, char *s2) {
     int i = 0;
     while (s1[i] != '\0' || s2[i] != '\0') {
@@ -825,7 +829,6 @@ int strcmp(char *s1, char *s2) {
     return 1;
 }
 
-/* Fungsi pengecekan awalan string */
 int startsWith(char *s, char *prefix) {
     int i = 0;
     while (prefix[i] != '\0') {
@@ -835,92 +838,83 @@ int startsWith(char *s, char *prefix) {
     return 1;
 }
 
-/* Fungsi konversi string ke integer */
-int atoi(char *s) {
+int getNumber(char *str, int startIdx, int *nextIdx) {
     int res = 0;
-    int i = 0;
-    while (s[i] >= '0' && s[i] <= '9') {
-        res = res * 10 + (s[i] - '0');
+    int i = startIdx;
+    while (str[i] == ' ') i++;
+    while (str[i] >= '0' && str[i] <= '9') {
+        res = res * 10 + (str[i] - '0');
         i++;
     }
+    if (nextIdx != 0) {
+        *nextIdx = i;
+    }
     return res;
 }
 
-/* Fungsi pembantu pengganti pembagian (/) dan modulo (%) */
-void divmod10(int n, int *div, int *mod) {
-    *div = 0;
-    while (n >= 10) {
-        n -= 10;
-        (*div)++;
-    }
-    *mod = n;
-}
-
-/* Fungsi konversi integer ke string */
-void intToString(int n, char *buf) {
-    char temp[16];
-    int i = 0;
+/* Versi Unrolled: Bebas dari alokasi array lokal dan pointer mismatch */
+void intToString(int num, char *str) {
+    int idx = 0;
     int isNegative = 0;
-    int div, mod, j; /* Harus dideklarasi di atas fungsi */
+    int started = 0;
+    int div;
 
-    if (n == 0) {
-        buf[0] = '0';
-        buf[1] = '\0';
+    if (num == 0) {
+        str[0] = '0';
+        str[1] = '\0';
         return;
     }
-
-    if (n < 0) {
+    
+    if (num < 0) {
         isNegative = 1;
-        n = -n;
+        num = -num;
     }
-
-    while (n > 0) {
-        divmod10(n, &div, &mod);
-        temp[i++] = mod + '0';
-        n = div;
-    }
-
-    j = 0;
+    
+    // Cek basis 10000
+    div = 0;
+    while (num >= 10000) { num -= 10000; div++; }
+    if (div > 0) { str[idx++] = div + '0'; started = 1; }
+    
+    // Cek basis 1000
+    div = 0;
+    while (num >= 1000) { num -= 1000; div++; }
+    if (div > 0 || started) { str[idx++] = div + '0'; started = 1; }
+    
+    // Cek basis 100
+    div = 0;
+    while (num >= 100) { num -= 100; div++; }
+    if (div > 0 || started) { str[idx++] = div + '0'; started = 1; }
+    
+    // Cek basis 10
+    div = 0;
+    while (num >= 10) { num -= 10; div++; }
+    if (div > 0 || started) { str[idx++] = div + '0'; started = 1; }
+    
+    // Sisa satuan
+    str[idx++] = num + '0';
+    
     if (isNegative) {
-        buf[j++] = '-';
+        int k;
+        for (k = idx; k > 0; k--) {
+            str[k] = str[k - 1];
+        }
+        str[0] = '-';
+        idx++;
     }
-
-    while (i > 0) {
-        buf[j++] = temp[--i];
-    }
-    buf[j] = '\0';
+    str[idx] = '\0';
 }
 
-/* Fungsi faktorial */
 int factorial(int n) {
     int res = 1;
-    int i;
-    for (i = 1; i <= n; i++) {
-        res = res * i;
+    int k;
+    for (k = 1; k <= n; k++) {
+        res = res * k;
     }
     return res;
 }
 
-/* Fungsi pemotong argumen angka */
-void parseTwoArgs(char *cmd, int startIdx, int *a, int *b) {
-    int i = startIdx;
-    while (cmd[i] == ' ') i++;
-    *a = atoi(cmd + i);
-    while (cmd[i] >= '0' && cmd[i] <= '9') i++;
-    while (cmd[i] == ' ') i++;
-    *b = atoi(cmd + i);
-}
-
-/* ================== MAIN SHELL ================== */
 void main() {
-    /* SEMUA VARIABEL WAJIB DIDEKLARASIKAN DI SINI UNTUK BCC */
-    char cmd[64];
-    char resBuf[32];
-    int a, b, n, i, j;
-    char *name;
-
     clearScreen();
-
     printString("Welcome to Assistant's Last Gift");
     newline();
     printString("type 'help'");
@@ -943,18 +937,20 @@ void main() {
             continue; 
         } 
         else if (startsWith(cmd, "add ")) {
-            parseTwoArgs(cmd, 4, &a, &b);
+            a = getNumber(cmd, 4, &next);
+            b = getNumber(cmd, next, 0);
             intToString(a + b, resBuf);
             printString(resBuf);
         } 
         else if (startsWith(cmd, "sub ")) {
-            parseTwoArgs(cmd, 4, &a, &b);
+            a = getNumber(cmd, 4, &next);
+            b = getNumber(cmd, next, 0);
             intToString(a - b, resBuf);
             printString(resBuf);
         } 
         else if (startsWith(cmd, "fac ")) {
-            n = atoi(cmd + 4);
-            if (n > 7) { /* Limit int 16-bit */
+            n = getNumber(cmd, 4, 0);
+            if (n > 7) {
                 printString("Know your limit little bro.");
             } else {
                 intToString(factorial(n), resBuf);
@@ -964,23 +960,23 @@ void main() {
         else if (startsWith(cmd, "season ")) {
             name = cmd + 7;
             if (strcmp(name, "winter")) {
-                color = 0x09; /* Biru terang */
+                color = 0x09;
                 printString("winter mode");
             }
             else if (strcmp(name, "spring")) {
-                color = 0x0A; /* Hijau terang */
+                color = 0x0A;
                 printString("spring mode");
             }
             else if (strcmp(name, "summer")) {
-                color = 0x0E; /* Kuning */
+                color = 0x0E;
                 printString("summer mode");
             }
             else if (strcmp(name, "fall")) {
-                color = 0x06; /* Coklat/Orange */
+                color = 0x06;
                 printString("fall mode");
             }
             else if (strcmp(name, "radiant")) {
-                color = 0x0D; /* Pink/Magenta */
+                color = 0x0D;
                 printString("radiant mode");
             }
             else {
@@ -988,12 +984,12 @@ void main() {
             }
         } 
         else if (startsWith(cmd, "triangle ")) {
-            n = atoi(cmd + 9);
+            n = getNumber(cmd, 9, 0);
             for (i = 1; i <= n; i++) {
                 for (j = 0; j < i; j++) {
-                    printChar('x'); 
+                    printChar('x');
                 }
-                if (i < n) newline(); 
+                if (i < n) newline();
             }
         } 
         else {
@@ -1001,7 +997,6 @@ void main() {
                 printString("Command not found.");
             }
         }
-
         newline();
     }
 }
@@ -1054,12 +1049,10 @@ _getChar:
 ```
 
 ## Output
-<img width="367" height="242" alt="image" src="https://github.com/user-attachments/assets/3a778c56-fa3a-4f4b-b05b-7017217844b7" />
-<img width="365" height="244" alt="image" src="https://github.com/user-attachments/assets/23e2dfb7-85e4-483a-b1ff-585208fde1fe" />
-<img width="366" height="239" alt="image" src="https://github.com/user-attachments/assets/22b7aed6-53dc-45a7-b6f3-e50db4b49e8b" />
+<img width="365" height="242" alt="image" src="https://github.com/user-attachments/assets/525293ea-7089-47be-96b4-07aa3a913326" />
+<img width="370" height="245" alt="image" src="https://github.com/user-attachments/assets/1fa019af-79b6-4797-9095-7178ff10d1a4" />
+<img width="364" height="244" alt="image" src="https://github.com/user-attachments/assets/e26a5915-7660-4932-8a52-56df215c3aa9" />
+
 
 ## **Setelah Clear**
-<img width="362" height="242" alt="image" src="https://github.com/user-attachments/assets/707868a5-bed9-4882-9dd9-a8940b21719f" />
-
-### Kendala yang Dihadapi
-Belum berhasil saat testcase add, sub, & fac hasilnya 0 semua 
+<img width="369" height="245" alt="image" src="https://github.com/user-attachments/assets/6fbec40d-82f7-4f03-91f9-f288b0e992b0" />
