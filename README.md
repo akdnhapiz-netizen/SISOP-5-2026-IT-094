@@ -650,3 +650,414 @@ run:
 
 ### Kendala yang Dihadapi
 belum sempat solve soal 2
+
+
+
+# Revisi Soal 1
+saya menggunakan wsl karena sebelumnya pakai vm tidak bisa mengaktifkan nested virtualization
+### Solusi Script (`single.sh`) revisi single.sh
+```sh
+#!/bin/bash
+set -e
+
+# 1. Bersihkan folder sisa crash sebelumnya
+rm -rf single_fs
+
+mkdir -p single_fs
+cd single_fs
+
+echo "==> Mengunduh Alpine Mini Rootfs (Sama seperti Multi Mode)..."
+wget -nc https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/x86_64/alpine-minirootfs-3.19.1-x86_64.tar.gz
+tar -xf alpine-minirootfs-*.tar.gz
+
+echo "==> Setup Package Manager (party) dari Turunan Distro Alpine..."
+# Memenuhi Soal 9: Menyalin apk asli menjadi party
+cp sbin/apk sbin/party
+echo "alias wget='wget --no-check-certificate'" >> etc/profile
+
+echo "==> Membuat Init script khusus Single User Mode (Direct Root Shell)..."
+cat << 'EOF' > init
+#!/bin/sh
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+
+# Mounting filesystem utama
+mount -t proc none /proc
+mount -t sysfs none /sys
+mount -t devtmpfs none /dev
+
+# NYALAKAN NETWORK INTERFACE SEBELUM MEMINTA IP
+ip link set lo up
+ip link set eth0 up
+
+# Meminta IP dari QEMU DHCP
+udhcpc -i eth0
+
+echo "========================================="
+echo "Welcome to Single User Mode (Root Only)"
+echo "========================================="
+
+# CIRI KHAS SINGLE USER MODE: Langsung masuk ke shell tanpa login/getty/password!
+exec /bin/sh </dev/console >/dev/console 2>&1
+EOF
+
+chmod +x init
+
+# Proteksi tambahan: Hapus karakter Windows (\r)
+sed -i 's/\r$//' init
+
+echo "==> Membungkus menjadi initramfs single.gz..."
+find . -print0 | cpio --null -ov --format=newc | gzip -9 > ../osboot/single.gz
+cd ..
+
+# Bersihkan folder temporary
+rm -rf single_fs
+echo "==> single.gz selesai dibuat di osboot dengan aman!"
+```
+## Output
+**BEFORE**
+<img width="777" height="482" alt="Screenshot 2026-06-04 095312" src="https://github.com/user-attachments/assets/1019268a-35d9-4665-9ed5-42875561bd54" />
+**AFTER**
+<img width="513" height="460" alt="image" src="https://github.com/user-attachments/assets/922b1936-679d-43e3-a2e4-c1be9af9f541" />
+<img width="566" height="117" alt="image" src="https://github.com/user-attachments/assets/14ada81e-ac50-4e53-9bb7-2c138087fd33" />
+<img width="712" height="439" alt="image" src="https://github.com/user-attachments/assets/958f8c35-33bd-467e-858d-a9139920d915" />
+<img width="815" height="211" alt="image" src="https://github.com/user-attachments/assets/b00bd72d-45a6-49e7-abe4-23a8e67f7135" />
+
+
+## Output multi
+<img width="781" height="419" alt="image" src="https://github.com/user-attachments/assets/640477fb-d43b-41db-8ab7-a72acd498c16" />
+<img width="670" height="366" alt="image" src="https://github.com/user-attachments/assets/197cf94f-d0f9-4c9d-866f-ed44e4ee6325" />
+<img width="555" height="111" alt="image" src="https://github.com/user-attachments/assets/b495e175-cf10-4969-97aa-20efcb4fe38e" />
+<img width="708" height="446" alt="image" src="https://github.com/user-attachments/assets/8daeb4b2-96d9-4b7f-95ef-0a78f0072a8a" />
+
+# Revisi Soal 2
+### Solusi Script (`bochsrc.txt`) revisi bochsrc.txt
+```txt
+megs: 32
+romimage: file=/usr/share/bochs/BIOS-bochs-legacy
+vgaromimage: file=/usr/share/bochs/VGABIOS-lgpl-latest
+boot: floppy
+floppya: 1_44=floppy.img, status=inserted
+log: bochslog.txt
+mouse: enabled=0
+display_library: sdl2
+speaker: enabled=0, mode=none
+```
+
+### Solusi Script (`kernel.c`) revisi kernel.c
+```c
+int cursor = 0;
+char color = 0x07;
+
+/* Prototipe fungsi assembly */
+void putInMemory(int segment, int address, char character);
+int getChar();
+
+/* Fungsi output per karakter */
+void printChar(char character) {
+    putInMemory(0xB800, cursor, character);
+    putInMemory(0xB800, cursor + 1, color);
+    cursor += 2;
+}
+
+/* Fungsi output string */
+void printString(char *string) {
+    int i = 0;
+    while (string[i] != '\0') {
+        printChar(string[i]);
+        i++;
+    }
+}
+
+/* Fungsi baris baru (pengganti modulo %) */
+void newline() {
+    int temp = cursor;
+    while (temp >= 160) {
+        temp -= 160;
+    }
+    cursor = cursor - temp + 160;
+    if (cursor >= 4000) {
+        cursor = 0; /* Reset jika layar penuh */
+    }
+}
+
+/* Fungsi membersihkan layar */
+void clearScreen() {
+    int i;
+    for (i = 0; i < 80 * 25 * 2; i += 2) {
+        putInMemory(0xB800, i, ' ');
+        putInMemory(0xB800, i + 1, 0x07);
+    }
+    cursor = 0;
+}
+
+/* Fungsi membaca input keyboard */
+void readString(char *buf) {
+    int i = 0;
+    char c;
+    while (1) {
+        c = getChar();
+        if (c == '\r' || c == '\n') {
+            buf[i] = '\0';
+            break;
+        } else if (c == '\b') {
+            if (i > 0) {
+                i--;
+                cursor -= 2;
+                printChar(' ');
+                cursor -= 2;
+            }
+        } else if (i < 63) {
+            buf[i] = c;
+            printChar(c);
+            i++;
+        }
+    }
+}
+
+/* Fungsi komparasi string */
+int strcmp(char *s1, char *s2) {
+    int i = 0;
+    while (s1[i] != '\0' || s2[i] != '\0') {
+        if (s1[i] != s2[i]) return 0;
+        i++;
+    }
+    return 1;
+}
+
+/* Fungsi pengecekan awalan string */
+int startsWith(char *s, char *prefix) {
+    int i = 0;
+    while (prefix[i] != '\0') {
+        if (s[i] != prefix[i]) return 0;
+        i++;
+    }
+    return 1;
+}
+
+/* Fungsi konversi string ke integer */
+int atoi(char *s) {
+    int res = 0;
+    int i = 0;
+    while (s[i] >= '0' && s[i] <= '9') {
+        res = res * 10 + (s[i] - '0');
+        i++;
+    }
+    return res;
+}
+
+/* Fungsi pembantu pengganti pembagian (/) dan modulo (%) */
+void divmod10(int n, int *div, int *mod) {
+    *div = 0;
+    while (n >= 10) {
+        n -= 10;
+        (*div)++;
+    }
+    *mod = n;
+}
+
+/* Fungsi konversi integer ke string */
+void intToString(int n, char *buf) {
+    char temp[16];
+    int i = 0;
+    int isNegative = 0;
+    int div, mod, j; /* Harus dideklarasi di atas fungsi */
+
+    if (n == 0) {
+        buf[0] = '0';
+        buf[1] = '\0';
+        return;
+    }
+
+    if (n < 0) {
+        isNegative = 1;
+        n = -n;
+    }
+
+    while (n > 0) {
+        divmod10(n, &div, &mod);
+        temp[i++] = mod + '0';
+        n = div;
+    }
+
+    j = 0;
+    if (isNegative) {
+        buf[j++] = '-';
+    }
+
+    while (i > 0) {
+        buf[j++] = temp[--i];
+    }
+    buf[j] = '\0';
+}
+
+/* Fungsi faktorial */
+int factorial(int n) {
+    int res = 1;
+    int i;
+    for (i = 1; i <= n; i++) {
+        res = res * i;
+    }
+    return res;
+}
+
+/* Fungsi pemotong argumen angka */
+void parseTwoArgs(char *cmd, int startIdx, int *a, int *b) {
+    int i = startIdx;
+    while (cmd[i] == ' ') i++;
+    *a = atoi(cmd + i);
+    while (cmd[i] >= '0' && cmd[i] <= '9') i++;
+    while (cmd[i] == ' ') i++;
+    *b = atoi(cmd + i);
+}
+
+/* ================== MAIN SHELL ================== */
+void main() {
+    /* SEMUA VARIABEL WAJIB DIDEKLARASIKAN DI SINI UNTUK BCC */
+    char cmd[64];
+    char resBuf[32];
+    int a, b, n, i, j;
+    char *name;
+
+    clearScreen();
+
+    printString("Welcome to Assistant's Last Gift");
+    newline();
+    printString("type 'help'");
+    newline();
+    newline();
+
+    while (1) {
+        printString("> ");
+        readString(cmd);
+        newline();
+
+        if (strcmp(cmd, "check")) {
+            printString("ok");
+        } 
+        else if (strcmp(cmd, "help")) {
+            printString("Commands: check, add, sub, fac, season, triangle, clear");
+        }
+        else if (strcmp(cmd, "clear")) {
+            clearScreen();
+            continue; 
+        } 
+        else if (startsWith(cmd, "add ")) {
+            parseTwoArgs(cmd, 4, &a, &b);
+            intToString(a + b, resBuf);
+            printString(resBuf);
+        } 
+        else if (startsWith(cmd, "sub ")) {
+            parseTwoArgs(cmd, 4, &a, &b);
+            intToString(a - b, resBuf);
+            printString(resBuf);
+        } 
+        else if (startsWith(cmd, "fac ")) {
+            n = atoi(cmd + 4);
+            if (n > 7) { /* Limit int 16-bit */
+                printString("Know your limit little bro.");
+            } else {
+                intToString(factorial(n), resBuf);
+                printString(resBuf);
+            }
+        } 
+        else if (startsWith(cmd, "season ")) {
+            name = cmd + 7;
+            if (strcmp(name, "winter")) {
+                color = 0x09; /* Biru terang */
+                printString("winter mode");
+            }
+            else if (strcmp(name, "spring")) {
+                color = 0x0A; /* Hijau terang */
+                printString("spring mode");
+            }
+            else if (strcmp(name, "summer")) {
+                color = 0x0E; /* Kuning */
+                printString("summer mode");
+            }
+            else if (strcmp(name, "fall")) {
+                color = 0x06; /* Coklat/Orange */
+                printString("fall mode");
+            }
+            else if (strcmp(name, "radiant")) {
+                color = 0x0D; /* Pink/Magenta */
+                printString("radiant mode");
+            }
+            else {
+                printString("Unknown season.");
+            }
+        } 
+        else if (startsWith(cmd, "triangle ")) {
+            n = atoi(cmd + 9);
+            for (i = 1; i <= n; i++) {
+                for (j = 0; j < i; j++) {
+                    printChar('x'); 
+                }
+                if (i < n) newline(); 
+            }
+        } 
+        else {
+            if (cmd[0] != '\0') {
+                printString("Command not found.");
+            }
+        }
+
+        newline();
+    }
+}
+```
+### Solusi Script (`kernel.asm`) revisi kernel.asm
+```c
+bits 16
+
+global _start
+global _putInMemory
+global _getChar
+extern _main
+
+_start:
+    cli
+    mov ax, cs
+    mov ds, ax
+    mov es, ax
+    sti
+    call _main
+
+.hang:
+    jmp .hang
+
+_putInMemory:
+    push bp
+    mov bp, sp
+    push ds
+    mov ax, [bp+4]
+    mov si, [bp+6]
+    mov cl, [bp+8]
+    mov ds, ax
+    mov [si], cl
+    pop ds
+    pop bp
+    ret
+
+; Fungsi untuk mengambil karakter dari keyboard
+_getChar:
+    push bp
+    mov bp, sp
+    
+    mov ah, 0x00      ; Interrupt untuk membaca keystroke
+    int 0x16          ; Panggil BIOS interrupt 16h
+    
+    mov ah, 0x00      ; Bersihkan scancode di AH, sisakan karakter ASCII di AL
+    
+    pop bp
+    ret
+```
+
+## Output
+<img width="367" height="242" alt="image" src="https://github.com/user-attachments/assets/3a778c56-fa3a-4f4b-b05b-7017217844b7" />
+<img width="365" height="244" alt="image" src="https://github.com/user-attachments/assets/23e2dfb7-85e4-483a-b1ff-585208fde1fe" />
+<img width="366" height="239" alt="image" src="https://github.com/user-attachments/assets/22b7aed6-53dc-45a7-b6f3-e50db4b49e8b" />
+**Setelah Clear**
+<img width="362" height="242" alt="image" src="https://github.com/user-attachments/assets/707868a5-bed9-4882-9dd9-a8940b21719f" />
+
+### Kendala yang Dihadapi
+Belum berhasil saat testcase add, sub, & fac hasilnya 0 semua 
