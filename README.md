@@ -714,9 +714,10 @@ rm -rf single_fs
 echo "==> single.gz selesai dibuat di osboot dengan aman!"
 ```
 ## Output
-**BEFORE**
+## **BEFORE**
 <img width="777" height="482" alt="Screenshot 2026-06-04 095312" src="https://github.com/user-attachments/assets/1019268a-35d9-4665-9ed5-42875561bd54" />
-**AFTER**
+
+## **AFTER**
 <img width="513" height="460" alt="image" src="https://github.com/user-attachments/assets/922b1936-679d-43e3-a2e4-c1be9af9f541" />
 <img width="566" height="117" alt="image" src="https://github.com/user-attachments/assets/14ada81e-ac50-4e53-9bb7-2c138087fd33" />
 <img width="712" height="439" alt="image" src="https://github.com/user-attachments/assets/958f8c35-33bd-467e-858d-a9139920d915" />
@@ -1056,7 +1057,8 @@ _getChar:
 <img width="367" height="242" alt="image" src="https://github.com/user-attachments/assets/3a778c56-fa3a-4f4b-b05b-7017217844b7" />
 <img width="365" height="244" alt="image" src="https://github.com/user-attachments/assets/23e2dfb7-85e4-483a-b1ff-585208fde1fe" />
 <img width="366" height="239" alt="image" src="https://github.com/user-attachments/assets/22b7aed6-53dc-45a7-b6f3-e50db4b49e8b" />
-**Setelah Clear**
+
+## **Setelah Clear**
 <img width="362" height="242" alt="image" src="https://github.com/user-attachments/assets/707868a5-bed9-4882-9dd9-a8940b21719f" />
 
 ### Kendala yang Dihadapi
